@@ -1,0 +1,7 @@
+main_app:
+  title: Serial Device
+  description: A simple serial device app
+  version: 0.1.0
+  width: 800
+  height: 600
+  icon: IMG_6732.ico  # Asegúrate de usar .ico si es un bitmap

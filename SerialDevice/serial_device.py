@@ -1,59 +1,101 @@
-import time 
-import serial 
-import os
+import time
+import serial
 import sys
-#serial_device = serial.Serial()
+from serial.tools import list_ports
 
-BAUDRATES =[
-300,1200,14400,
-115200,600,2400,
-19200,230400,4800,
-38400,460800,9600,
-57600,110,28800,
-128000,56000,153600,
-256000,921600,
+# Supported baud rates
+BAUDRATES = [
+    110, 300, 600, 1200, 2400, 4800, 9600, 14400,
+    19200, 28800, 38400, 57600, 115200, 230400,
+    256000, 460800, 560000, 921600, 128000, 153600
 ]
 
 class SerialDevice:
-    def __init__(self, port:str,baudrate:int):
+    """
+    Wrapper around pyserial's Serial
+    """
+    def __init__(self, port: str, baudrate: int, timeout: float = 2.0):
         if baudrate not in BAUDRATES:
-            raise ValueError (f"Baudrate not supported {baudrate}")
-        
-        self.serial_device = serial.Serial(
-            port=port,
-        @staticmethod
-        def find_avalible_ports()->list[str]:
-            if sys.platform.startswith('win'):
-                ports = ['COM%s' % (i + 1) for i in range(256)]
+            raise ValueError(f"Baudrate not supported: {baudrate}")
+        try:
+            self.serial = serial.Serial(
+                port=port,
+                baudrate=baudrate,
+                timeout=timeout
+            )
+            # give the device time to initialize
+            time.sleep(2)
+        except serial.SerialException as e:
+            raise RuntimeError(f"Unable to open serial port: {e}")
+
+    @staticmethod
+    def find_available_ports() -> list[str]:
+        """
+        Returns a list of available serial port names on the system.
+        """
+        return [p.device for p in list_ports.comports()]
+
+    def write(self, data: bytes) -> None:
+        """
+        Write raw bytes to the serial device.
+        """
+        self.serial.write(data)
+
+    def read_line(self) -> bytes:
+        """
+        Read a single line (ending with newline) from the device.
+        """
+        return self.serial.readline()
+
+    def close(self) -> None:
+        """
+        Close the serial connection.
+        """
+        if self.serial.is_open:
+            self.serial.close()
 
 
-SERIAL_PORT = 'COM9'  # Replace with your serial port
-BAUD_RATE = 9600
-serial_device = serial.Serial(
-    port=SERIAL_PORT,
-    baudrate=BAUD_RATE,
-    #timeout=2  # segundos
-)
-# Wait for the serial device to initialize
-time.sleep(2)
-serial_device.write(b"Connect")
-message = serial_device.readline()
+def main():
+    # List and select ports
+    ports = SerialDevice.find_available_ports()
+    if not ports:
+        print("No serial ports found. Exiting.")
+        sys.exit(1)
 
-#Pregunta ; que tipo de mensaje es
-print(type(message))
-print(message.decode(encoding='utf-8'))
+    print("Available ports:")
+    for i, p in enumerate(ports):
+        print(f"  {i}: {p}")
 
-while True:
+    choice = input("Select port index (default 0): ").strip()
+    port = ports[int(choice)] if choice.isdigit() and int(choice) < len(ports) else ports[0]
+    baud = input(f"Enter baud rate (default {9600}): ").strip()
+    baud = int(baud) if baud.isdigit() else 9600
+
+    # Initialize device
     try:
-        to_send = input("Enter a message to send: ")
-        serial_device.write(to_send.encode())
-        time.sleep(1)
+        dev = SerialDevice(port, baud)
+    except Exception as e:
+        print(e)
+        sys.exit(1)
 
-        message = serial_device.readline()
-        print(message.decode(encoding='utf-8'))
+    # Handshake
+    dev.write(b"Connect\n")
+    response = dev.read_line()
+    print("Handshake response:", response.decode('utf-8', errors='ignore').strip())
+
+    # Interactive loop
+    try:
+        while True:
+            to_send = input("Enter a message to send (Ctrl+C to exit): ")
+            dev.write(to_send.encode('utf-8') + b"\n")
+            time.sleep(0.1)
+            incoming = dev.read_line()
+            print("Received:", incoming.decode('utf-8', errors='ignore').strip())
     except KeyboardInterrupt:
         print("Exiting...")
-        break
-serial_device.close()
-# Close the serial device
+    finally:
+        dev.close()
 
+
+if __name__ == '__main__':
+    main()
