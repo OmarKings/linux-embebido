@@ -1,100 +1,63 @@
-
-"""
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
-
-app = FastAPI(
-    title="Servidor DropAir",
-    version="beta 0.0.1",
-)
-
-templates = Jinja2Templates(directory="templates")
-
-@app.get("/", response_class=HTMLResponse)
-async def read_root(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
-
-@app.get("/test/", status_code=200)
-def test_endpoint(request: Request):
-    return {"mensaje": "Todo OK ✅"}
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=9090)
-"""
-
-
-# Airdop para programadores
+from fastapi import FastAPI, UploadFile, File
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 import os
-import shutil
+import RPi.GPIO as GPIO
 
-from fastapi import FastAPI
+app = FastAPI()
+GPIO.setmode(GPIO.BCM)
 
-from fastapi import File
-from fastapi import UploadFile
-from fastapi import HTTPException
-from fastapi.responses import HTMLResponse
-from starlette.requests import Request
+# Configura los pines GPIO para relés
+RELAY_PINS = [17, 27, 22, 5]
+for pin in RELAY_PINS:
+    GPIO.setup(pin, GPIO.OUT)
+    GPIO.output(pin, GPIO.LOW)  # Inicialmente apagado
 
-UPLOADS_FOLDER = './Server/'
+# Carpeta para archivos
+UPLOAD_FOLDER = "uploads"
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-app = FastAPI(
+# Montar frontend estático
+app.mount("/", StaticFiles(directory="static", html=True), name="static")
 
-    title="Servidor DropAir",
-    version="beta  0.0.1",
+# Encender o apagar relés
+@app.post("/relay/{index}/on")
+def relay_on(index: int):
+    if 0 <= index < len(RELAY_PINS):
+        GPIO.output(RELAY_PINS[index], GPIO.HIGH)
+        return {"status": "ON"}
+    return {"error": "Índice fuera de rango"}
 
-)
+@app.post("/relay/{index}/off")
+def relay_off(index: int):
+    if 0 <= index < len(RELAY_PINS):
+        GPIO.output(RELAY_PINS[index], GPIO.LOW)
+        return {"status": "OFF"}
+    return {"error": "Índice fuera de rango"}
 
-@app.get('/test/',status_code=200)
-def test_endpoint(request:Request):
-    return "()"
+# Subir archivo
+@app.post("/upload")
+async def upload(file: UploadFile = File(...)):
+    file_path = os.path.join(UPLOAD_FOLDER, file.filename)
+    with open(file_path, "wb") as buffer:
+        buffer.write(await file.read())
+    return {"filename": file.filename}
 
-@app.get('/', response_class=HTMLResponse)
-def upload_file_v2():
-    content = """
-<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Página Bonita</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-gradient-to-br from-indigo-200 via-purple-100 to-pink-200 min-h-screen flex items-center justify-center">
-  <div class="bg-white/80 backdrop-blur-lg rounded-2xl shadow-2xl p-10 max-w-lg text-center">
-    <h1 class="text-4xl font-bold text-indigo-600 mb-4">¡Hola, programador!</h1>
-    <p class="text-lg text-gray-700 mb-6">
-      Bienvenido a DropAir, tu sistema de envío fácil de archivos. 🚀
-    </p>
-    <form action="/upload-file/" method="post" enctype="multipart/form-data" class="inline-block">
-      <input type="file" name="file" class="mb-4">
-      <button type="submit" class="bg-indigo-500 hover:bg-indigo-600 text-white px-6 py-3 rounded-full font-semibold transition">
-        Subir archivo
-      </button>
-    </form>
-  </div>
-</body>
-</html>
-"""
+# Listar archivos
+@app.get("/files")
+def list_files():
+    return os.listdir(UPLOAD_FOLDER)
 
-    return content
+# Descargar archivo
+@app.get("/files/{filename}")
+def get_file(filename: str):
+    return FileResponse(os.path.join(UPLOAD_FOLDER, filename))
 
-
-
-@app.post('/upload-file/', status_code=201)
-def upload_file(file: UploadFile = File(...)):
-    try:
-        os.makedirs(UPLOADS_FOLDER,exist_ok=True)
-        filepath = os.path.join(UPLOADS_FOLDER, file.filename)
-        with open(filepath, 'w') as f:
-            shutil.copyfileobj(file.file, f)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail='COULD YOU UPLOAD YOUR FILE!')
-
-
-    
-
-if __name__ == '__main__':
-    import uvicorn
-    uvicorn.run(app,host="0.0.0.0",port=9090)
+# Eliminar archivo
+@app.delete("/files/{filename}")
+def delete_file(filename: str):
+    path = os.path.join(UPLOAD_FOLDER, filename)
+    if os.path.exists(path):
+        os.remove(path)
+        return {"status": "Archivo eliminado"}
+    return {"error": "Archivo no encontrado"}
